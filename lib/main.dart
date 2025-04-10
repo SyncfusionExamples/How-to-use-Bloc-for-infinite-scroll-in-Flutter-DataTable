@@ -1,12 +1,38 @@
-# How to use Bloc for infinite scroll in Flutter DataTable (SfDataGrid)?.
+import 'dart:async';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 
-In this article, we will show how to use Bloc for infinite scroll in [Flutter DataTable](https://www.syncfusion.com/flutter-widgets/flutter-datagrid).
+void main() {
+  runApp(
+    BlocProvider(
+      create: (context) => EmployeeBloc(),
+      child: const MaterialApp(home: InfiniteScrollWithBloc()),
+    ),
+  );
+}
 
-Step 1- Set up your BLoC architecture:
+class InfiniteScrollWithBloc extends StatefulWidget {
+  const InfiniteScrollWithBloc({super.key});
 
-Start by creating the Bloc that listens for events. When an event is triggered, it emits either a loaded state with a list of Employee objects or an error state in case of failure. Wrap your SfDataGrid in a BlocListener to respond to state changes. When the EmployeeLoaded state is emitted for the first time, set a flag variable to prevent multiple triggers.
+  @override
+  State<InfiniteScrollWithBloc> createState() => _InfiniteScrollWithBlocState();
+}
 
-```dart
+class _InfiniteScrollWithBlocState extends State<InfiniteScrollWithBloc> {
+  late EmployeeDataSource _dataSource;
+  bool _hasLoadedInitially = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _dataSource = EmployeeDataSource(context);
+    BlocProvider.of<EmployeeBloc>(
+      context,
+    ).add(FetchEmployees(startIndex: 0, count: 20));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -100,13 +126,55 @@ Start by creating the Bloc that listens for events. When an event is triggered, 
       ),
     );
   }
-```
+}
 
-Step 2- Enable infinite scroll:
+// -----------------------------
+// Employee DataSource
+// -----------------------------
+class EmployeeDataSource extends DataGridSource {
+  final BuildContext context;
+  final List<Employee> _employees = [];
+  final List<DataGridRow> _rows = [];
 
-Override the [handleLoadMoreRows()](https://pub.dev/documentation/syncfusion_flutter_datagrid/latest/datagrid/DataGridSource/handleLoadMoreRows.html) method in your DataGridSource to fetch additional data when the user scrolls near the bottom of the grid. Use a Completer along with a Bloc stream listener to wait for new data and update the grid accordingly. The SfDataGrid widget provides the [loadMoreViewBuilder](https://pub.dev/documentation/syncfusion_flutter_datagrid/latest/datagrid/SfDataGrid/loadMoreViewBuilder.html) callback, which can be used to display a loading spinner while more rows are being fetched. This builder invokes loadMoreRows(), triggering the actual data-fetching process. When listening to the Bloc stream inside handleLoadMoreRows(), always cancel the subscription after the Future completes to avoid memory leaks.
+  EmployeeDataSource(this.context);
 
-```dart
+  @override
+  List<DataGridRow> get rows => _rows;
+
+  void addMoreRows(List<Employee> newEmployees) {
+    _employees.addAll(newEmployees);
+    _rows.addAll(
+      newEmployees.map(
+        (e) => DataGridRow(
+          cells: [
+            DataGridCell<int>(columnName: 'id', value: e.id),
+            DataGridCell<String>(columnName: 'name', value: e.name),
+            DataGridCell<String>(
+              columnName: 'designation',
+              value: e.designation,
+            ),
+            DataGridCell<int>(columnName: 'salary', value: e.salary),
+          ],
+        ),
+      ),
+    );
+    notifyListeners();
+  }
+
+  @override
+  DataGridRowAdapter buildRow(DataGridRow row) {
+    return DataGridRowAdapter(
+      cells:
+          row.getCells().map((e) {
+            return Container(
+              alignment: Alignment.center,
+              padding: const EdgeInsets.all(8.0),
+              child: Text(e.value.toString()),
+            );
+          }).toList(),
+    );
+  }
+
   @override
   Future<void> handleLoadMoreRows() async {
     final currentLength = _employees.length;
@@ -133,6 +201,93 @@ Override the [handleLoadMoreRows()](https://pub.dev/documentation/syncfusion_flu
     await completer.future;
     await subscription.cancel();
   }
-```
+}
 
-You can download this example on [GitHub](https://github.com/SyncfusionExamples/How-to-use-Bloc-for-infinite-scroll-in-Flutter-DataTable).
+// -----------------------------
+// Employee Model
+// -----------------------------
+class Employee {
+  final int id;
+  final String name;
+  final String designation;
+  final int salary;
+
+  Employee(this.id, this.name, this.designation, this.salary);
+}
+
+// -----------------------------
+// Bloc Definitions
+// -----------------------------
+abstract class EmployeeEvent {}
+
+class FetchEmployees extends EmployeeEvent {
+  final int startIndex;
+  final int count;
+
+  FetchEmployees({required this.startIndex, required this.count});
+}
+
+abstract class EmployeeState {}
+
+class EmployeeInitial extends EmployeeState {}
+
+class EmployeeLoaded extends EmployeeState {
+  final List<Employee> employees;
+
+  EmployeeLoaded({required this.employees});
+}
+
+class EmployeeError extends EmployeeState {
+  final String error;
+
+  EmployeeError({required this.error});
+}
+
+class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
+  final int totalCount = 1000;
+  final List<String> names = [
+    'Alice',
+    'Bob',
+    'Charlie',
+    'David',
+    'Emma',
+    'Frank',
+    'Grace',
+    'Hannah',
+    'Isaac',
+    'Jack',
+    'Karen',
+    'Leo',
+    'Mona',
+    'Nate',
+    'Olivia',
+  ];
+  final List<String> designations = [
+    'Engineer',
+    'Manager',
+    'Designer',
+    'Developer',
+    'Analyst',
+  ];
+
+  EmployeeBloc() : super(EmployeeInitial()) {
+    on<FetchEmployees>((event, emit) async {
+      try {
+        await Future.delayed(const Duration(seconds: 1));
+        int endIndex = (event.startIndex + event.count).clamp(0, totalCount);
+        final random = Random();
+        final employees = List.generate(endIndex - event.startIndex, (i) {
+          return Employee(
+            event.startIndex + i + 1,
+            names[random.nextInt(names.length)],
+            designations[random.nextInt(designations.length)],
+            3000 + random.nextInt(2000),
+          );
+        });
+        emit(EmployeeLoaded(employees: employees));
+      } catch (e) {
+        emit(EmployeeError(error: e.toString()));
+      }
+    });
+  }
+}
